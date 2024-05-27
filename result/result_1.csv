@@ -1,0 +1,8 @@
+filename,compile_time_ns,compile_mem_kb,compiled_file_size_bytes,run_time_ns,run_mem_kb
+.control1.c,30968068,0,15960,490326,0
+bubbleSort.c,40339989,0,16496,2526251,0
+insertionSort.c,37106565,0,16504,1250351,0
+mergeSort.c,36690047,0,16528,734448,0
+quickSort.c,35322094,0,16560,796066,0
+selectionSort.c,34881939,0,16536,1681418,0
+.control2.c,33437385,0,16464,583179,0
