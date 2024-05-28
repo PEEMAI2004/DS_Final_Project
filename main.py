@@ -6,12 +6,16 @@ import psutil
 import csv
 import random
 import struct
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 # Constants
 ALGORITHMS_DIR = 'algorithms'
 RESULTS_DIR = 'results'
 CSV_FILENAME_PREFIX = 'results'
 CSV_FILENAME_EXTENSION = '.csv'
+NUM_THREADS = 8  # Number of threads to use
+MEMORY_SAMPLING_INTERVAL = 0.1  # Memory sampling interval in seconds
 
 # Ensure the results folder exists
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -39,13 +43,14 @@ def measure_time_memory(command):
     process = psutil.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     peak_memory = 0
     stdout, stderr = None, None
-    
+
     while process.poll() is None:
         try:
             current_memory = process.memory_info().rss
             peak_memory = max(peak_memory, current_memory)
         except psutil.NoSuchProcess:
             break
+        time.sleep(MEMORY_SAMPLING_INTERVAL)
 
     stdout, stderr = process.communicate()
     end_time = time.time()
@@ -73,10 +78,11 @@ def generate_numbers_bin(size):
 SIZE = int(input("Enter the size of the array: "))
 generate_numbers_bin(SIZE)
 
-# Collect data
+# Thread-safe data collection
 data = []
+data_lock = Lock()
 
-for c_file in c_files:
+def process_file(c_file):
     base_name = os.path.basename(c_file)
     compiled_file = os.path.join(ALGORITHMS_DIR, base_name.replace('.c', ''))
 
@@ -92,8 +98,10 @@ for c_file in c_files:
     # Check if the compiled file was created
     if compile_returncode != 0:
         print(f"\033[91mFailed to compile {base_name}: {compile_error.decode()}\033[0m")
-        data.append([base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', compile_error.decode(), SIZE])
-        continue
+        result = [base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', compile_error.decode(), SIZE]
+        with data_lock:
+            data.append(result)
+        return
 
     print(f"\033[92mCompiled {base_name}\033[0m")
 
@@ -106,15 +114,24 @@ for c_file in c_files:
 
     if run_returncode != 0:
         print(f"\033[91mFailed to run {base_name}: {run_error.decode()}\033[0m")
-        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', run_error.decode(), SIZE])
+        result = [base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', run_error.decode(), SIZE]
     else:
         print(f"\033[92mRan {base_name}\033[0m")
-        # Collect the results
-        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Success', '', SIZE])
+        result = [base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Success', '', SIZE]
 
     # Delete the compiled file
     os.remove(compiled_file)
     print(f"\033[93mDeleted compiled file {compiled_file}\033[0m")
+
+    # Collect the results
+    with data_lock:
+        data.append(result)
+
+# Use ThreadPoolExecutor to process files in parallel
+with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+    futures = [executor.submit(process_file, c_file) for c_file in c_files]
+    for future in as_completed(futures):
+        future.result()  # wait for all futures to complete
 
 # Write results to CSV
 with open(csv_filepath, mode='w', newline='') as file:

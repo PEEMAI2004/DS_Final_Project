@@ -1,2 +1,5 @@
 *.csv
 *.bin
+venv/
+path/
+graph_picture/
