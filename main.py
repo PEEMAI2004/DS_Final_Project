@@ -4,6 +4,8 @@ import subprocess
 import time
 import psutil
 import csv
+import random
+import struct
 
 # Constants
 ALGORITHMS_DIR = 'algorithms'
@@ -29,7 +31,7 @@ while True:
 # Headers for the CSV file
 headers = ['Filename', 'C File Size (bytes)', 'Compiled File Size (bytes)', 
            'Compile Time (microseconds)', 'Compile Memory (bytes)', 
-           'Run Time (microseconds)', 'Run Memory (bytes)', 'Status', 'Error']
+           'Run Time (microseconds)', 'Run Memory (bytes)', 'Status', 'Error', 'Number of Samples']
 
 # Helper functions
 def measure_time_memory(command):
@@ -60,6 +62,17 @@ def delete_out_files(subfolder):
     except OSError as e:
         print(f'Error deleting .out files: {e}')
 
+# Generate numbers.bin file
+def generate_numbers_bin(size):
+    numbers = random.sample(range(1, size * 2), size)
+    data = struct.pack('{}i'.format(size), *numbers)
+    with open('numbers.bin', 'wb') as file:
+        file.write(data)
+
+# User-defined SIZE
+SIZE = int(input("Enter the size of the array: "))
+generate_numbers_bin(SIZE)
+
 # Collect data
 data = []
 
@@ -79,7 +92,7 @@ for c_file in c_files:
     # Check if the compiled file was created
     if compile_returncode != 0:
         print(f"\033[91mFailed to compile {base_name}: {compile_error.decode()}\033[0m")
-        data.append([base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', compile_error.decode()])
+        data.append([base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', compile_error.decode(), SIZE])
         continue
 
     print(f"\033[92mCompiled {base_name}\033[0m")
@@ -93,11 +106,11 @@ for c_file in c_files:
 
     if run_returncode != 0:
         print(f"\033[91mFailed to run {base_name}: {run_error.decode()}\033[0m")
-        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', run_error.decode()])
+        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', run_error.decode(), SIZE])
     else:
         print(f"\033[92mRan {base_name}\033[0m")
         # Collect the results
-        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Success', ''])
+        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Success', '', SIZE])
 
     # Delete the compiled file
     os.remove(compiled_file)

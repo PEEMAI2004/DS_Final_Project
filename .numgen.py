@@ -2,9 +2,9 @@ import random
 import struct
 
 # Define the size of the array
-SIZE = 1000
+SIZE = 10000
 
-# Generate 1000 unique random numbers
+# Generate n unique random numbers
 numbers = random.sample(range(1, SIZE * 2), SIZE)
 
 # Convert numbers to bytes
