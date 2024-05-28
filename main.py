@@ -1,110 +1,115 @@
 import os
+import glob
 import subprocess
 import time
+import psutil
 import csv
-import resource
 
-SUBFOLDER = 'algorithms'
-RESULT_FOLDER = 'result'
-CSV_FILENAME_PREFIX = 'result'
+# Constants
+ALGORITHMS_DIR = 'algorithms'
+RESULTS_DIR = 'results'
+CSV_FILENAME_PREFIX = 'results'
 CSV_FILENAME_EXTENSION = '.csv'
 
-def get_memory_usage():
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+# Ensure the results folder exists
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
-def compile_and_time(filepath, filename):
-    output_path = os.path.join(SUBFOLDER, f'{filename}.out')
-    compile_command = ['gcc', filepath, '-o', output_path]
-    
-    # Measure compilation time and memory usage
-    compile_start_time = time.time_ns()
-    compile_start_mem = get_memory_usage()
-    compile_result = subprocess.run(compile_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    compile_end_time = time.time_ns()
-    compile_end_mem = get_memory_usage()
-    
-    compile_time_taken = compile_end_time - compile_start_time  # Time in nanoseconds
-    compile_mem_used = compile_end_mem - compile_start_mem      # Memory in kilobytes
-    
-    if compile_result.returncode != 0:
-        print(f'Failed to compile {filename}.')
-        print(compile_result.stderr.decode())
-        return (filename, compile_time_taken, compile_mem_used, None, None, None)
-    
-    # Get compiled file size
-    compiled_file_size = os.path.getsize(output_path)  # Size in bytes
-    
-    print(f'Compiled {filename} in {compile_time_taken} ns. Memory used: {compile_mem_used} KB. Compiled file size: {compiled_file_size} bytes.')
+# Find all .c files in the algorithms directory and sort them alphabetically
+c_files = sorted(glob.glob(os.path.join(ALGORITHMS_DIR, '*.c')))
 
-    # Measure runtime and memory usage
-    run_command = [output_path]
-    run_start_time = time.time_ns()
-    run_start_mem = get_memory_usage()
-    run_result = subprocess.run(run_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    run_end_time = time.time_ns()
-    run_end_mem = get_memory_usage()
-    
-    run_time_taken = run_end_time - run_start_time  # Time in nanoseconds
-    run_mem_used = run_end_mem - run_start_mem      # Memory in kilobytes
-    
-    if run_result.returncode == 0:
-        print(f'Ran {filename} in {run_time_taken} ns. Memory used: {run_mem_used} KB.')
-    else:
-        print(f'Failed to run {filename}.')
-        print(run_result.stderr.decode())
-    
-    return (filename, compile_time_taken, compile_mem_used, compiled_file_size, run_time_taken, run_mem_used)
+# Find the next available CSV filename
+i = 1
+while True:
+    csv_filename = f'{CSV_FILENAME_PREFIX}_{i}{CSV_FILENAME_EXTENSION}'
+    csv_filepath = os.path.join(RESULTS_DIR, csv_filename)
+    if not os.path.exists(csv_filepath):
+        break
+    i += 1
 
-def delete_out_files():
+# Headers for the CSV file
+headers = ['Filename', 'C File Size (bytes)', 'Compiled File Size (bytes)', 
+           'Compile Time (microseconds)', 'Compile Memory (bytes)', 
+           'Run Time (microseconds)', 'Run Memory (bytes)', 'Status', 'Error']
+
+# Helper functions
+def measure_time_memory(command):
+    start_time = time.time()
+    process = psutil.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    peak_memory = 0
+    stdout, stderr = None, None
+    
+    while process.poll() is None:
+        try:
+            current_memory = process.memory_info().rss
+            peak_memory = max(peak_memory, current_memory)
+        except psutil.NoSuchProcess:
+            break
+
+    stdout, stderr = process.communicate()
+    end_time = time.time()
+    elapsed_time = (end_time - start_time) * 1_000_000  # Convert to microseconds
+    return elapsed_time, peak_memory, process.returncode, stdout, stderr
+
+def delete_out_files(subfolder):
     try:
-        files = os.listdir(SUBFOLDER)
+        files = os.listdir(subfolder)
         for filename in files:
             if filename.endswith('.out'):
-                filepath = os.path.join(SUBFOLDER, filename)
+                filepath = os.path.join(subfolder, filename)
                 os.remove(filepath)
     except OSError as e:
         print(f'Error deleting .out files: {e}')
 
-def main():
-    try:
-        files = os.listdir(SUBFOLDER)
-    except OSError as e:
-        print(f'Error opening directory: {e}')
-        return
+# Collect data
+data = []
 
-    compilation_and_runtime_times = []
+for c_file in c_files:
+    base_name = os.path.basename(c_file)
+    compiled_file = os.path.join(ALGORITHMS_DIR, base_name.replace('.c', ''))
 
-    for filename in files:
-        if filename.endswith('.c'):
-            filepath = os.path.join(SUBFOLDER, filename)
-            result = compile_and_time(filepath, filename)
-            compilation_and_runtime_times.append(result)
-    
-    # Ensure the result folder exists
-    os.makedirs(RESULT_FOLDER, exist_ok=True)
-    
-    # Find the next available CSV filename
-    i = 1
-    while True:
-        csv_filename = f'{CSV_FILENAME_PREFIX}_{i}{CSV_FILENAME_EXTENSION}'
-        if not os.path.exists(os.path.join(RESULT_FOLDER, csv_filename)):
-            break
-        i += 1
-    
-    csv_filepath = os.path.join(RESULT_FOLDER, csv_filename)
-    
-    # Write the results to the CSV file
-    with open(csv_filepath, 'w', newline='') as csvfile:
-        fieldnames = ['filename', 'compile_time_ns', 'compile_mem_kb', 'compiled_file_size_bytes', 'run_time_ns', 'run_mem_kb']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        writer.writeheader()
-        for filename, compile_time, compile_mem, compiled_file_size, run_time, run_mem in compilation_and_runtime_times:
-            writer.writerow({'filename': filename, 'compile_time_ns': compile_time, 'compile_mem_kb': compile_mem,
-                             'compiled_file_size_bytes': compiled_file_size, 'run_time_ns': run_time, 'run_mem_kb': run_mem})
+    print(f"Processing {base_name}...")
 
-    # Delete all compiled files
-    delete_out_files()
+    # Measure the size of the .c file
+    c_file_size = os.path.getsize(c_file)
 
-if __name__ == '__main__':
-    main()
+    # Compile the C file
+    compile_command = ['gcc', c_file, '-o', compiled_file]
+    compile_time, compile_memory, compile_returncode, _, compile_error = measure_time_memory(compile_command)
+
+    # Check if the compiled file was created
+    if compile_returncode != 0:
+        print(f"\033[91mFailed to compile {base_name}: {compile_error.decode()}\033[0m")
+        data.append([base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', compile_error.decode()])
+        continue
+
+    print(f"\033[92mCompiled {base_name}\033[0m")
+
+    # Measure the size of the compiled file
+    compiled_file_size = os.path.getsize(compiled_file)
+
+    # Run the compiled file
+    run_command = [compiled_file]
+    run_time, run_memory, run_returncode, _, run_error = measure_time_memory(run_command)
+
+    if run_returncode != 0:
+        print(f"\033[91mFailed to run {base_name}: {run_error.decode()}\033[0m")
+        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', run_error.decode()])
+    else:
+        print(f"\033[92mRan {base_name}\033[0m")
+        # Collect the results
+        data.append([base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Success', ''])
+
+    # Delete the compiled file
+    os.remove(compiled_file)
+    print(f"\033[93mDeleted compiled file {compiled_file}\033[0m")
+
+# Write results to CSV
+with open(csv_filepath, mode='w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(headers)
+    writer.writerows(data)
+
+print(f"Results have been written to {csv_filepath}")
+
+# Delete .out files in the algorithms directory
+delete_out_files(ALGORITHMS_DIR)

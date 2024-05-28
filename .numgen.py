@@ -1,11 +1,14 @@
 import random
 import struct
 
+# Define the size of the array
+SIZE = 1000
+
 # Generate 1000 unique random numbers
-numbers = random.sample(range(1, 2000), 1000)
+numbers = random.sample(range(1, SIZE * 2), SIZE)
 
 # Convert numbers to bytes
-data = struct.pack('1000i', *numbers)
+data = struct.pack('{}i'.format(SIZE), *numbers)
 
 # Write the bytes to a binary file
 with open('numbers.bin', 'wb') as file:
