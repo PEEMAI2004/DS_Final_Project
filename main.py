@@ -37,25 +37,36 @@ headers = ['Filename', 'C File Size (bytes)', 'Compiled File Size (bytes)',
            'Compile Time (microseconds)', 'Compile Memory (bytes)', 
            'Run Time (microseconds)', 'Run Memory (bytes)', 'Status', 'Error', 'Number of Samples']
 
+def convert_to_command(input_list):
+    return ' '.join(input_list)
+
 # Helper functions
 def measure_time_memory(command):
+    command = convert_to_command(command)
+    print(f"Running command: {command}")
+    # Start the command
     start_time = time.time()
-    process = psutil.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    peak_memory = 0
-    stdout, stderr = None, None
-
-    while process.poll() is None:
-        try:
-            current_memory = process.memory_info().rss
-            peak_memory = max(peak_memory, current_memory)
-        except psutil.NoSuchProcess:
-            break
-        time.sleep(MEMORY_SAMPLING_INTERVAL)
-
-    stdout, stderr = process.communicate()
+    process = subprocess.Popen(command, shell=True)
+    
+    # Get process info
+    process_info = psutil.Process(process.pid)
+    
+    # Monitor RAM usage
+    peak_ram_usage = 0
+    try:
+        while process.poll() is None:
+            current_ram_usage = process_info.memory_info().rss / (1024)  # in kB
+            if current_ram_usage > peak_ram_usage:
+                peak_ram_usage = current_ram_usage 
+            time.sleep(0.1)  # Sleep a bit before checking again
+    except psutil.NoSuchProcess:
+        pass  # The process finished before we could check again
+    
+    # Calculate the total run time
     end_time = time.time()
-    elapsed_time = (end_time - start_time) * 1_000_000  # Convert to microseconds
-    return elapsed_time, peak_memory, process.returncode, stdout, stderr
+    run_time = (end_time - start_time) * 1000000  # in microseconds
+    
+    return run_time, peak_ram_usage, process.returncode
 
 def delete_out_files(subfolder):
     try:
@@ -93,12 +104,12 @@ def process_file(c_file):
 
     # Compile the C file
     compile_command = ['gcc', c_file, '-o', compiled_file]
-    compile_time, compile_memory, compile_returncode, _, compile_error = measure_time_memory(compile_command)
+    compile_time, compile_memory, compile_returncode = measure_time_memory(compile_command)
 
     # Check if the compiled file was created
     if compile_returncode != 0:
-        print(f"\033[91mFailed to compile {base_name}: {compile_error.decode()}\033[0m")
-        result = [base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', compile_error.decode(), SIZE]
+        print(f"\033[91mFailed to compile {base_name}: \033[0m")
+        result = [base_name, c_file_size, 0, compile_time, compile_memory, 0, 0, 'Compilation Failed', SIZE]
         with data_lock:
             data.append(result)
         return
@@ -110,11 +121,11 @@ def process_file(c_file):
 
     # Run the compiled file
     run_command = [compiled_file]
-    run_time, run_memory, run_returncode, _, run_error = measure_time_memory(run_command)
+    run_time, run_memory, run_returncode = measure_time_memory(run_command)
 
     if run_returncode != 0:
-        print(f"\033[91mFailed to run {base_name}: {run_error.decode()}\033[0m")
-        result = [base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', run_error.decode(), SIZE]
+        print(f"\033[91mFailed to run {base_name}: \033[0m")
+        result = [base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Runtime Failed', SIZE]
     else:
         print(f"\033[92mRan {base_name}\033[0m")
         result = [base_name, c_file_size, compiled_file_size, compile_time, compile_memory, run_time, run_memory, 'Success', '', SIZE]
