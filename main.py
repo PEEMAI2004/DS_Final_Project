@@ -44,27 +44,30 @@ def convert_to_command(input_list):
 def measure_time_memory(command):
     command = convert_to_command(command)
     print(f"Running command: {command}")
-    # Start the command
-    start_time = time.time()
-    process = subprocess.Popen(command, shell=True)
     
-    # Get process info
-    process_info = psutil.Process(process.pid)
-    
-    # Monitor RAM usage
-    peak_ram_usage = 0
-    try:
-        while process.poll() is None:
-            current_ram_usage = process_info.memory_info().rss / (1024)  # in kB
-            if current_ram_usage > peak_ram_usage:
-                peak_ram_usage = current_ram_usage 
-            time.sleep(0.1)  # Sleep a bit before checking again
-    except psutil.NoSuchProcess:
-        pass  # The process finished before we could check again
-    
-    # Calculate the total run time
-    end_time = time.time()
-    run_time = (end_time - start_time) * 1000000  # in microseconds
+    # Redirect stdout and stderr to os.devnull
+    with open(os.devnull, 'w') as devnull:
+        # Start the command
+        start_time = time.time()
+        process = subprocess.Popen(command, shell=True, stdout=devnull, stderr=devnull)
+        
+        # Get process info
+        process_info = psutil.Process(process.pid)
+        
+        # Monitor RAM usage
+        peak_ram_usage = 0
+        try:
+            while process.poll() is None:
+                current_ram_usage = process_info.memory_info().rss / 1024  # in kB
+                if current_ram_usage > peak_ram_usage:
+                    peak_ram_usage = current_ram_usage
+                time.sleep(0.1)  # Sleep a bit before checking again
+        except psutil.NoSuchProcess:
+            pass  # The process finished before we could check again
+        
+        # Calculate the total run time
+        end_time = time.time()
+        run_time = (end_time - start_time) * 1000000  # in microseconds
     
     return run_time, peak_ram_usage, process.returncode
 
