@@ -6,6 +6,7 @@ import psutil
 import csv
 import random
 import struct
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
@@ -42,32 +43,35 @@ def convert_to_command(input_list):
 
 # Helper functions
 def measure_time_memory(command):
-    command = convert_to_command(command)
-    print(f"Running command: {command}")
+    # Measure runtime
+    start_time = time.time()
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    end_time = time.time()
+    run_time = (end_time - start_time) * 1000000  # in microseconds
+
+    # Check if the command succeeded
+    if process.returncode != 0:
+        return run_time, 0, process.returncode
     
-    # Redirect stdout and stderr to os.devnull
-    with open(os.devnull, 'w') as devnull:
-        # Start the command
-        start_time = time.time()
-        process = subprocess.Popen(command, shell=True, stdout=devnull, stderr=devnull)
-        
-        # Get process info
-        process_info = psutil.Process(process.pid)
-        
-        # Monitor RAM usage
-        peak_ram_usage = 0
-        try:
-            while process.poll() is None:
-                current_ram_usage = process_info.memory_info().rss / 1024  # in kB
-                if current_ram_usage > peak_ram_usage:
-                    peak_ram_usage = current_ram_usage
-                time.sleep(0.1)  # Sleep a bit before checking again
-        except psutil.NoSuchProcess:
-            pass  # The process finished before we could check again
-        
-        # Calculate the total run time
-        end_time = time.time()
-        run_time = (end_time - start_time) * 1000000  # in microseconds
+    # Measure peak memory usage with Valgrind's massif tool
+    valgrind_command = f"valgrind --tool=massif --massif-out-file=massif.out {command}"
+    process = subprocess.Popen(valgrind_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    # Parse the massif output file to find the peak memory usage
+    peak_ram_usage = 0
+    try:
+        with open('massif.out', 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            match = re.match(r'^\s*mem_heap_B=(\d+)', line)
+            if match:
+                peak_ram_usage = max(peak_ram_usage, int(match.group(1)))
+                
+    except FileNotFoundError:
+        print("Massif output file not found.")
+        return measure_time_memory(command)
     
     return run_time, peak_ram_usage, process.returncode
 
@@ -107,6 +111,7 @@ def process_file(c_file):
 
     # Compile the C file
     compile_command = ['gcc', c_file, '-o', compiled_file]
+    compile_command = convert_to_command(compile_command)
     compile_time, compile_memory, compile_returncode = measure_time_memory(compile_command)
 
     # Check if the compiled file was created
@@ -124,6 +129,7 @@ def process_file(c_file):
 
     # Run the compiled file
     run_command = [compiled_file]
+    run_command = convert_to_command(run_command)
     run_time, run_memory, run_returncode = measure_time_memory(run_command)
 
     if run_returncode != 0:
