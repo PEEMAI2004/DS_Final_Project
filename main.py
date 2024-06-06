@@ -46,9 +46,10 @@ def measure_time_memory(command):
     # Measure runtime
     start_time = time.time()
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
     end_time = time.time()
     run_time = (end_time - start_time) * 1000000  # in microseconds
+    
+    stdout, stderr = process.communicate()
 
     # Check if the command succeeded
     if process.returncode != 0:
@@ -68,7 +69,7 @@ def measure_time_memory(command):
             match = re.match(r'^\s*mem_heap_B=(\d+)', line)
             if match:
                 peak_ram_usage = max(peak_ram_usage, int(match.group(1)))
-                
+
     except FileNotFoundError:
         print("Massif output file not found.")
         return measure_time_memory(command)
